@@ -2,6 +2,11 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
+#include <condition_variable>
+#include <queue>
+#include <mutex>
+#include <thread>
+#include <functional>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -51,6 +56,13 @@ class TaskSystemParallelThreadPoolSpinning: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+    private:
+        using TaskTypeInternal = std::function<void (void)>;
+        std::vector<std::thread> m_threads;
+        std::queue<TaskTypeInternal> m_task_pool;
+        std::mutex m_mutex;
+        bool m_is_finished;
 };
 
 /*
@@ -68,6 +80,14 @@ class TaskSystemParallelThreadPoolSleeping: public ITaskSystem {
         TaskID runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                 const std::vector<TaskID>& deps);
         void sync();
+
+    private:
+        using TaskTypeInternal = std::function<void (void)>;
+        std::vector<std::thread> m_threads;
+        std::queue<TaskTypeInternal> m_task_pool;
+        std::mutex m_mutex;
+        std::condition_variable m_cond_var;
+        bool m_is_finished;
 };
 
 #endif
