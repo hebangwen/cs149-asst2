@@ -56,48 +56,50 @@ const char* TaskSystemParallelSpawn::name() {
 }
 
 TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads), m_num_threads(num_threads) {
+    m_threads.resize(m_num_threads);
+    m_threads_time_cost.resize(m_num_threads, 0.0);
+    m_workloads.resize(m_num_threads, 1);
 
+    m_time_thres = 0.005;
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    std::vector<std::thread> threads(m_num_threads);
-    std::vector<double> thread_time_cost(m_num_threads, 0);
-    std::vector<int> workloads(m_num_threads, 1);
-    double threshold = 0.005;
+    m_threads_time_cost.resize(m_num_threads, 0.0);
+    m_workloads.resize(m_num_threads, 1);
 
     int tid = 0;
     for (int i = 0; i < num_total_tasks; ) {
         if (i >= m_num_threads) {
-            if (threads[tid].joinable()) {
-                threads[tid].join();
+            if (m_threads[tid].joinable()) {
+                m_threads[tid].join();
             }
 
-            if (thread_time_cost[tid] < threshold) {
-                workloads[tid] <<= 1;
+            if (m_threads_time_cost[tid] < m_time_thres) {
+                m_workloads[tid] = static_cast<int>(m_time_thres / m_threads_time_cost[tid]);
             } else {
-                workloads[tid] = (workloads[tid] >> 1) + (workloads[tid] >> 2);
-                workloads[tid] = std::max(1, workloads[tid]);
+                m_workloads[tid] = (m_workloads[tid] >> 1) + (m_workloads[tid] >> 2);
             }
+            m_workloads[tid] = std::max(1, m_workloads[tid]);
         }
 
-        threads[tid] = std::thread([&, i, tid] () {
-            int n = std::min(workloads[tid], num_total_tasks - i);
+        m_threads[tid] = std::thread([&, i, tid] () {
+            int n = std::min(m_workloads[tid], num_total_tasks - i);
             auto start = CycleTimer::currentSeconds();
             for (int k = 0; k < n; k++) {
                 runnable->runTask(i + k, num_total_tasks);
             }
             auto end = CycleTimer::currentSeconds();
 
-            thread_time_cost[tid] = end - start;
+            m_threads_time_cost[tid] = end - start;
         });
 
-        i += workloads[tid];
+        i += m_workloads[tid];
         tid = (tid + 1) % m_num_threads;
     }
 
-    for (auto &t : threads) {
+    for (auto &t : m_threads) {
         if (t.joinable()) {
             t.join();
         }

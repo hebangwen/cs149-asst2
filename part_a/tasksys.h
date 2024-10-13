@@ -42,7 +42,11 @@ class TaskSystemParallelSpawn: public ITaskSystem {
 
     private:
         using TaskTypeInternal = std::function<void (void)>;
+        std::vector<std::thread> m_threads;
+        std::vector<double> m_threads_time_cost;
+        std::vector<int> m_workloads;
         int m_num_threads;
+        double m_time_thres;
 };
 
 /*
