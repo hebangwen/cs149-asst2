@@ -60,14 +60,13 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
     m_threads_time_cost.resize(m_num_threads, 0.0);
     m_workloads.resize(m_num_threads, 1);
 
-    m_time_thres = 0.005;
+    m_time_thres = 0.0001;
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    m_threads_time_cost.resize(m_num_threads, 0.0);
-    m_workloads.resize(m_num_threads, 1);
+    m_workloads.assign(m_num_threads, 1);
 
     int tid = 0;
     for (int i = 0; i < num_total_tasks; ) {
@@ -77,10 +76,13 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
             }
 
             if (m_threads_time_cost[tid] < m_time_thres) {
-                m_workloads[tid] = static_cast<int>(m_time_thres / m_threads_time_cost[tid]);
+                int num_iters = static_cast<int>(m_time_thres / m_threads_time_cost[tid]) * m_workloads[tid];
+                m_workloads[tid] = std::max(num_iters, m_workloads[tid]);
             } else {
                 m_workloads[tid] = (m_workloads[tid] >> 1) + (m_workloads[tid] >> 2);
             }
+            // printf("%s\t\ti: %d/%d, tid: %d, time_cost: %lf, thres: %lf, iter: %d\n",
+            //         __func__, i, num_total_tasks, tid, m_threads_time_cost[tid], m_time_thres, m_workloads[tid]);
             m_workloads[tid] = std::max(1, m_workloads[tid]);
         }
 
