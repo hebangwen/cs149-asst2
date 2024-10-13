@@ -41,6 +41,7 @@ class TaskSystemParallelSpawn: public ITaskSystem {
         void sync();
 
     private:
+        using TaskTypeInternal = std::function<void (void)>;
         int m_num_threads;
 };
 

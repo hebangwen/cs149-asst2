@@ -62,24 +62,46 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    std::vector<std::thread> threads;
-    for (int i = 0; i < num_total_tasks; i++) {
-        if (i < m_num_threads) {
-            threads.push_back(
-                std::thread([=] () {
-                    runnable->runTask(i, num_total_tasks);
-                })
-            );
-        } else {
-            int j = i % m_num_threads;
-            threads[j].join();
-            threads[j] = std::thread([=] () {
-                runnable->runTask(i, num_total_tasks);
-            });
+    std::vector<std::thread> threads(m_num_threads);
+    std::vector<double> thread_time_cost(m_num_threads, 0);
+    std::vector<int> workloads(m_num_threads, 1);
+    double threshold = 0.005;
+
+    int tid = 0;
+    for (int i = 0; i < num_total_tasks; ) {
+        if (i >= m_num_threads) {
+            if (threads[tid].joinable()) {
+                threads[tid].join();
+            }
+
+            if (thread_time_cost[tid] < threshold) {
+                workloads[tid] <<= 1;
+            } else {
+                workloads[tid] = (workloads[tid] >> 1) + (workloads[tid] >> 2);
+                workloads[tid] = std::max(1, workloads[tid]);
+            }
         }
+
+        threads[tid] = std::thread([&, i, tid] () {
+            int n = std::min(workloads[tid], num_total_tasks - i);
+            auto start = CycleTimer::currentSeconds();
+            for (int k = 0; k < n; k++) {
+                runnable->runTask(i + k, num_total_tasks);
+            }
+            auto end = CycleTimer::currentSeconds();
+
+            thread_time_cost[tid] = end - start;
+        });
+
+        i += workloads[tid];
+        tid = (tid + 1) % m_num_threads;
     }
 
-    for (auto &t : threads)  t.join();
+    for (auto &t : threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
