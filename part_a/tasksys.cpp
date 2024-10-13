@@ -62,29 +62,24 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    std::queue<std::thread> thread_queue;
+    std::vector<std::thread> threads;
     for (int i = 0; i < num_total_tasks; i++) {
         if (i < m_num_threads) {
-            thread_queue.push(
+            threads.push_back(
                 std::thread([=] () {
                     runnable->runTask(i, num_total_tasks);
                 })
             );
         } else {
-            thread_queue.front().join();
-            thread_queue.pop();
-            thread_queue.push(
-                std::thread([=] () {
-                    runnable->runTask(i, num_total_tasks);
-                })
-            );
+            int j = i % m_num_threads;
+            threads[j].join();
+            threads[j] = std::thread([=] () {
+                runnable->runTask(i, num_total_tasks);
+            });
         }
     }
 
-    while (!thread_queue.empty()) {
-        thread_queue.front().join();
-        thread_queue.pop();
-    }
+    for (auto &t : threads)  t.join();
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
