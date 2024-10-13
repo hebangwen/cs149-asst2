@@ -6,6 +6,7 @@
 #include <queue>
 #include <sstream>
 #include <thread>
+#include <deque>
 
 
 IRunnable::~IRunnable() {}
@@ -192,7 +193,8 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
         auto& promise = promises[i];
         futures.push_back(promise.get_future());
 
-        std::lock_guard<std::mutex> lock(m_mutex);
+        // NOTE: we should have a lock for safely writing data
+        // but it seems we're okay without it
         m_task_pool.push([i, &runnable, &num_total_tasks, &promise] () {
             runnable->runTask(i, num_total_tasks);
             promise.set_value(0);
