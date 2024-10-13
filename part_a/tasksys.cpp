@@ -60,12 +60,28 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
     m_threads_time_cost.resize(m_num_threads, 0.0);
     m_workloads.resize(m_num_threads, 1);
 
-    m_time_thres = 0.0005 * 1000.0;
+    m_time_thres = 0.0001 * 1000.0;
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
+    if (num_total_tasks <= m_num_threads) {
+        for (int i = 0; i < num_total_tasks; i++) {
+            m_threads[i] = std::thread([=] () {
+                runnable->runTask(i, num_total_tasks);
+            });
+        }
+
+        for (auto& t : m_threads) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+
+        return;
+    }
+
     auto start = CycleTimer::currentSeconds();
     runnable->runTask(0, num_total_tasks);
     auto end = CycleTimer::currentSeconds();
