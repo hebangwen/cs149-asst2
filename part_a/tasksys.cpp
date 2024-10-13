@@ -1,7 +1,9 @@
 #include "tasksys.h"
+#include "CycleTimer.h"
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <queue>
 #include <sstream>
 #include <thread>
 
@@ -60,35 +62,28 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    std::vector<std::thread> threads;
-    int n = num_total_tasks - num_total_tasks % m_num_threads;
-    for (int i = 0; i < n; i += m_num_threads) {
-        for (int j = 0; j < m_num_threads; j++) {
-            threads.emplace_back([=] () {
-                runnable->runTask(i + j, num_total_tasks);
-            });
+    std::queue<std::thread> thread_queue;
+    for (int i = 0; i < num_total_tasks; i++) {
+        if (i < m_num_threads) {
+            thread_queue.push(
+                std::thread([=] () {
+                    runnable->runTask(i, num_total_tasks);
+                })
+            );
+        } else {
+            thread_queue.front().join();
+            thread_queue.pop();
+            thread_queue.push(
+                std::thread([=] () {
+                    runnable->runTask(i, num_total_tasks);
+                })
+            );
         }
-
-        for (int j = 0; j < m_num_threads; j++) {
-            threads[j].join();
-        }
-
-        threads.clear();
     }
 
-    {
-        int m = num_total_tasks - n;
-        for (int j = 0; j < m; j++) {
-            threads.emplace_back([=] () {
-                runnable->runTask(n + j, num_total_tasks);
-            });
-        }
-
-        for (int j = 0; j < m; j++) {
-            threads[j].join();
-        }
-
-        threads.clear();
+    while (!thread_queue.empty()) {
+        thread_queue.front().join();
+        thread_queue.pop();
     }
 }
 
