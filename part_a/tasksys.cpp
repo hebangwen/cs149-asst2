@@ -60,7 +60,7 @@ TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(n
     m_threads_time_cost.resize(m_num_threads, 0.0);
     m_workloads.resize(m_num_threads, 1);
 
-    m_time_thres = 0.0005;
+    m_time_thres = 0.0005 * 1000.0;
 }
 
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
@@ -69,9 +69,8 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
     auto start = CycleTimer::currentSeconds();
     runnable->runTask(0, num_total_tasks);
     auto end = CycleTimer::currentSeconds();
-    m_threads_time_cost.assign(m_num_threads, end - start);
+    m_threads_time_cost.assign(m_num_threads, (end - start) * 1000.0);
     m_workloads.assign(m_num_threads, 1);
-    // m_threads_time_cost.assign(m_num_threads, m_time_thres);
 
     int tid = 0;
     for (int i = 1; i < num_total_tasks; ) {
@@ -85,8 +84,9 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
         } else {
             m_workloads[tid] = (m_workloads[tid] >> 1) + (m_workloads[tid] >> 2);
         }
-        // printf("%s\t\ti: %d/%d, tid: %d, time_cost: %lf, thres: %lf, iter: %d\n",
-        //         __func__, i, num_total_tasks, tid, m_threads_time_cost[tid], m_time_thres, m_workloads[tid]);
+        // printf("%s::%d\t\ti: %d/%d, tid: %d, time_cost: %lf, thres: %lf, iter: %d\n",
+        //         __func__, __LINE__, i, num_total_tasks, tid, 
+        //         m_threads_time_cost[tid], m_time_thres, m_workloads[tid]);
         m_workloads[tid] = std::max(1, m_workloads[tid]);
 
         m_threads[tid] = std::thread([&, i, tid] () {
@@ -97,7 +97,7 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
             }
             auto end = CycleTimer::currentSeconds();
 
-            m_threads_time_cost[tid] = end - start;
+            m_threads_time_cost[tid] = (end - start) * 1000.0;
         });
 
         i += m_workloads[tid];
@@ -109,6 +109,11 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
             t.join();
         }
     }
+
+    // for (int i = 0; i < m_num_threads; i++) {
+    //     printf("%s::%d\t\ti: %d, tid: %d, cost: %lf\n",
+    //             __func__, __LINE__, i, i, m_threads_time_cost[i]);
+    // }
 }
 
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
