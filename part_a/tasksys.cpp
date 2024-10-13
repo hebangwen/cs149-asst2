@@ -3,6 +3,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <mutex>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -155,20 +156,18 @@ const char* TaskSystemParallelThreadPoolSpinning::name() {
 
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads): ITaskSystem(num_threads) {
     m_is_finished = false;
+    m_num_threads = num_threads;
+    m_thread_task_pool.resize(m_num_threads);
 
-    for (int i = 0; i < num_threads; i++) {
-        m_threads.emplace_back([&] () {
+    for (int i = 0; i < m_num_threads; i++) {
+        m_threads.emplace_back([i, this] () {
+            int tid = i;
+            auto& queue = m_thread_task_pool[tid];
+
             while (!m_is_finished) {
-                TaskTypeInternal task;
-                {
-                    std::unique_lock<std::mutex> lock(m_mutex);
-                    if (!m_task_pool.empty()) {
-                        task = std::move(m_task_pool.front());
-                        m_task_pool.pop();
-                    }
-                }
-
-                if (task) {
+                while (!queue.empty()) {
+                    TaskTypeInternal task;
+                    queue.wait_and_pop(task);
                     task();
                 }
             }
@@ -180,7 +179,9 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
     m_is_finished = true;
     for (auto& thread : m_threads) {
-        thread.join();
+        if (thread.joinable()) {
+            thread.join();
+        }
     }
 }
 
@@ -192,11 +193,13 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
         auto& promise = promises[i];
         futures.push_back(promise.get_future());
 
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_task_pool.push([i, &runnable, &num_total_tasks, &promise] () {
-            runnable->runTask(i, num_total_tasks);
-            promise.set_value(0);
-        });
+        int tid = i % m_num_threads;
+        m_thread_task_pool[tid].push(
+            [i, &runnable, &num_total_tasks, &promise] () {
+                runnable->runTask(i, num_total_tasks);
+                promise.set_value(0);
+            }
+        );
     }
 
     for (int i = 0; i < num_total_tasks; i++) {
