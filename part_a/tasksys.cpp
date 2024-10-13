@@ -53,7 +53,7 @@ const char* TaskSystemParallelSpawn::name() {
     return "Parallel + Always Spawn";
 }
 
-TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads) {
+TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads): ITaskSystem(num_threads), m_num_threads(num_threads) {
 
 }
 
@@ -61,14 +61,34 @@ TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
 
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
     std::vector<std::thread> threads;
-    for (int i = 0; i < num_total_tasks; i++) {
-        threads.emplace_back([=] () {
-            runnable->runTask(i, num_total_tasks);
-        });
+    int n = num_total_tasks - num_total_tasks % m_num_threads;
+    for (int i = 0; i < n; i += m_num_threads) {
+        for (int j = 0; j < m_num_threads; j++) {
+            threads.emplace_back([=] () {
+                runnable->runTask(i + j, num_total_tasks);
+            });
+        }
+
+        for (int j = 0; j < m_num_threads; j++) {
+            threads[j].join();
+        }
+
+        threads.clear();
     }
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        threads[i].join();
+    {
+        int m = num_total_tasks - n;
+        for (int j = 0; j < m; j++) {
+            threads.emplace_back([=] () {
+                runnable->runTask(n + j, num_total_tasks);
+            });
+        }
+
+        for (int j = 0; j < m; j++) {
+            threads[j].join();
+        }
+
+        threads.clear();
     }
 }
 
