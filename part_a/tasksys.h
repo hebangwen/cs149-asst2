@@ -40,7 +40,7 @@ class threadsafe_queue {
         void wait_and_pop(T& value) {
             std::unique_lock<std::mutex> lk(mut);
             data_cond.wait(lk, [this] { return !data_queue.empty(); });
-            value = data_queue.front();
+            value = std::move(data_queue.front());
             data_queue.pop();
         }
 
