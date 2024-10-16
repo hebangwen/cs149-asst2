@@ -3,6 +3,7 @@
 #include <chrono>
 #include <future>
 #include <iostream>
+#include <mutex>
 #include <queue>
 #include <sstream>
 #include <thread>
@@ -188,16 +189,17 @@ void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_tota
     std::vector<std::promise<int>> promises(num_total_tasks);
     std::vector<std::future<int>>  futures;
 
+    std::unique_lock<std::mutex> lock(m_mutex);
     for (int i = 0; i < num_total_tasks; i++) {
         auto& promise = promises[i];
         futures.push_back(promise.get_future());
 
-        std::lock_guard<std::mutex> lock(m_mutex);
         m_task_pool.push([i, &runnable, &num_total_tasks, &promise] () {
             runnable->runTask(i, num_total_tasks);
             promise.set_value(0);
         });
     }
+    lock.unlock();
 
     for (int i = 0; i < num_total_tasks; i++) {
         futures[i].wait();
