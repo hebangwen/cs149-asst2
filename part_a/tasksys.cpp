@@ -159,19 +159,35 @@ TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int n
 
     for (int i = 0; i < num_threads; i++) {
         m_threads.emplace_back([&] () {
+            double thres = 0.0001 * 1000.0;
+            double cost = thres;
+            int num_task = 1;
+            std::vector<TaskTypeInternal> tasks;
+
             while (!m_is_finished) {
-                TaskTypeInternal task;
                 {
                     std::unique_lock<std::mutex> lock(m_mutex);
-                    if (!m_task_pool.empty()) {
-                        task = std::move(m_task_pool.front());
+
+                    if (cost >= thres) {
+                        num_task = 1;
+                    } else {
+                        num_task *= 2;
+                    }
+
+                    for (int j = 0; j < num_task && !m_task_pool.empty(); j++) {
+                        tasks.emplace_back(std::move(m_task_pool.front()));
                         m_task_pool.pop();
                     }
                 }
 
-                if (task) {
+                auto start = CycleTimer::currentSeconds();
+                for (auto& task : tasks) {
                     task();
                 }
+                auto end = CycleTimer::currentSeconds();
+                cost = (end - start) * 1000.0;
+
+                tasks.clear();
             }
         });
     }
