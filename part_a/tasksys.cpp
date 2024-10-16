@@ -228,12 +228,6 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
 }
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
     m_is_finished = false;
 
     for (int i = 0; i < num_threads; i++) {
@@ -247,13 +241,13 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
                         task = std::move(m_task_pool.front());
                         m_task_pool.pop();
                     }
-
-                    if (m_is_finished) break;
                 }
 
                 if (task) {
                     task();
                 }
+
+                if (m_is_finished) break;
             }
         });
     }
@@ -262,12 +256,6 @@ TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int n
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
     m_is_finished = true;
     m_cond_var.notify_all();
     for (auto& thread : m_threads) {
@@ -276,21 +264,14 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
-
-
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
     std::vector<std::promise<int>> promises(num_total_tasks);
     std::vector<std::future<int>>  futures;
 
+    std::unique_lock<std::mutex> lock(m_mutex);
     for (int i = 0; i < num_total_tasks; i++) {
         auto& promise = promises[i];
         futures.push_back(promise.get_future());
 
-        std::lock_guard<std::mutex> lock(m_mutex);
         m_task_pool.push([i, &runnable, &num_total_tasks, &promise] () {
             runnable->runTask(i, num_total_tasks);
             promise.set_value(0);
@@ -298,6 +279,7 @@ void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_tota
 
         m_cond_var.notify_one();
     }
+    lock.unlock();
 
     for (int i = 0; i < num_total_tasks; i++) {
         futures[i].wait();
