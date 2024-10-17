@@ -1,4 +1,7 @@
 #include "tasksys.h"
+#include <chrono>
+#include <mutex>
+#include <thread>
 
 
 IRunnable::~IRunnable() {}
@@ -127,57 +130,161 @@ const char* TaskSystemParallelThreadPoolSleeping::name() {
 }
 
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads): ITaskSystem(num_threads) {
-    //
-    // TODO: CS149 student implementations may decide to perform setup
-    // operations (such as thread pool construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    m_num_threads = num_threads;
+    m_task_counter = 0;
+
+    for (int i = 0; i < m_num_threads; i++) {
+        m_threads.emplace_back([&, i] () {
+            while (!m_has_finished) {
+                TaskTypeInternal task;
+                {
+                    std::unique_lock<std::mutex> lock(m_nodep_mutex);
+                    m_nodep_cv.wait(lock, [&] () { return !m_nodep_tasks.empty() || m_has_finished; });
+                    if (!m_nodep_tasks.empty()) {
+                        task = std::move(m_nodep_tasks.front());
+                        m_nodep_tasks.pop();
+                    }
+                }
+
+                if (task) {
+                    printf("%s::%d\t\trun task!\n", __func__, __LINE__);
+                    task();
+                    printf("%s::%d\t\tfinish task!\n", __func__, __LINE__);
+                }
+            }
+        });
+    }
 }
 
 TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
-    //
-    // TODO: CS149 student implementations may decide to perform cleanup
-    // operations (such as thread pool shutdown construction) here.
-    // Implementations are free to add new class member variables
-    // (requiring changes to tasksys.h).
-    //
+    m_has_finished = true;
+    m_nodep_cv.notify_all();
+    for (auto& t : m_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
+    for (auto* ptr : m_all_tasks) {
+        delete ptr;
+    }
 }
 
 void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
-
-
-    //
-    // TODO: CS149 students will modify the implementation of this
-    // method in Parts A and B.  The implementation provided below runs all
-    // tasks sequentially on the calling thread.
-    //
-
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
-    }
+    runAsyncWithDeps(runnable, num_total_tasks, {});
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
+    sync();
 }
 
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                                     const std::vector<TaskID>& deps) {
+    int task_id = m_task_counter++;
+    auto* task_record = new TaskRecord<int>{};
+    task_record->task_id = task_id;
+    task_record->dep_tasks = deps;
+    task_record->promises.resize(num_total_tasks);
 
+    m_all_tasks.push_back(task_record);
 
-    //
-    // TODO: CS149 students will implement this method in Part B.
-    //
+    printf("%s::%d\t\tsubmit task, record id %d, total task %d!\n", 
+            __func__, __LINE__, task_id, num_total_tasks);
 
-    for (int i = 0; i < num_total_tasks; i++) {
-        runnable->runTask(i, num_total_tasks);
+    if (deps.empty()) {
+        std::unique_lock<std::mutex> lock(m_nodep_mutex);
+        for (int i = 0; i < num_total_tasks; i++) {
+            auto& promise = task_record->promises[i];
+            task_record->futures.push_back(
+                promise.get_future());
+
+            m_nodep_tasks.push([&runnable, &promise, i, num_total_tasks] () {
+                printf("%s::%d\t\trunning task %d/%d\n",
+                        __func__, __LINE__, i, num_total_tasks);
+                runnable->runTask(i, num_total_tasks);
+                promise.set_value(0);
+                printf("%s::%d\t\tfinish task %d/%d\n",
+                        __func__, __LINE__, i, num_total_tasks);
+            });
+            m_nodep_cv.notify_one();
+        }
+        lock.unlock();
+
+        m_running_tasks.push_back(task_record);
+    } else {
+
+        for (int i = 0; i < num_total_tasks; i++) {
+            auto& promise = task_record->promises[i];
+            task_record->futures.push_back(
+                promise.get_future());
+            task_record->tasks.emplace_back(
+                [&runnable, &promise, i, num_total_tasks] () {
+                    printf("%s::%d\t\trunning task %d/%d\n",
+                            __func__, __LINE__, i, num_total_tasks);
+                    runnable->runTask(i, num_total_tasks);
+                    promise.set_value(0);
+                }
+            );
+        }
+
+        m_dep_tasks.push_back(task_record);
     }
 
-    return 0;
+    return task_id;
 }
 
 void TaskSystemParallelThreadPoolSleeping::sync() {
+    printf("%s::%d\t\tsync, task size: %zu!\n", 
+            __func__, __LINE__, m_running_tasks.size());
 
-    //
-    // TODO: CS149 students will modify the implementation of this method in Part B.
-    //
+    while (!m_running_tasks.empty()) {
+        for (auto* ptr : m_running_tasks) {
+            printf("%s::%d\t\tfuture size: %zu\n", 
+                    __func__, __LINE__, ptr->futures.size());
+            for (auto& future : ptr->futures) {
+                future.wait();
+            }
+        }
+        m_running_tasks.clear();
+    printf("%s::%d\t\twaited!\n", __func__, __LINE__);
+
+        std::deque<TaskRecord<int> *> nodep_tasks_ptrs;
+
+        for (auto it = m_dep_tasks.begin(); it != m_dep_tasks.end(); ) {
+            auto& deps = (*it)->dep_tasks;
+            bool is_deps_in_nodep_queue = true;
+            for (auto& task_id : deps) {
+                if (!m_all_tasks[task_id]->dep_tasks.empty()) {
+                    is_deps_in_nodep_queue = false;
+                    break;
+                }
+            }
+
+            if (is_deps_in_nodep_queue) {
+                auto* ptr = *it;
+                ptr->dep_tasks.clear();
+                nodep_tasks_ptrs.push_back(ptr);
+
+                it = m_dep_tasks.erase(it);
+            } else {
+                it++;
+            }
+        }
+
+        std::unique_lock<std::mutex> lock(m_nodep_mutex);
+        while (!nodep_tasks_ptrs.empty()) {
+            auto* task_record_ptr = nodep_tasks_ptrs.front();
+            for (auto& task : task_record_ptr->tasks) {
+                m_nodep_tasks.push(std::move(task));
+                m_nodep_cv.notify_one();
+            }
+
+            task_record_ptr->dep_tasks.clear();
+            task_record_ptr->tasks.clear();
+            m_running_tasks.push_back(task_record_ptr);
+
+            nodep_tasks_ptrs.pop_front();
+        }
+        lock.unlock();
+    }
 
     return;
 }
